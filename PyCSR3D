@@ -1,1 +1,93 @@
+from ocelot import *
+from ocelot.cpbd.elements import *
+from ocelot.gui.accelerator import *
+from ocelot.cpbd.track import track_debug
+import matplotlib.pyplot as plt
+import numpy as np
+import time
 
+from rfglinacbte1 import *   # your lattice definition
+from pycsr3d_proc import PyCSR3DProc
+
+
+lat = MagneticLattice(lattice_list)
+
+
+# print("=== BENDING MAGNETS FOUND ===")
+# for i, elem in enumerate(lattice_list):
+#     if isinstance(elem, SBend):
+#         angle = getattr(elem, "angle", None)
+#         length = getattr(elem, "l", None)
+
+#         # compute rho safely
+#         if angle not in (None, 0):
+#             rho = length / angle
+#         else:
+#             rho = None
+
+#         print(f"Index {i}: SBend | length={length} m | angle={angle} rad | rho={rho}")
+# print("=================================")
+
+
+
+# --- Twiss setup ---
+AX = -13.25; BX = 48.65; AY = -2.11; BY = 13.45
+EMITX = 1.2e-6; EMITY = 1.2e-6
+energy = 0.0328
+
+
+# ---- Twiss ----
+tw0 = Twiss()
+tw0.alpha_x = AX
+tw0.beta_x  = BX
+tw0.alpha_y = AY
+tw0.beta_y  = BY
+tw0.E = energy
+tw0.emit_xn = EMITX
+tw0.emit_yn = EMITY
+tw0.emit_x = EMITX / energy * 0.511e-3
+tw0.emit_y = EMITY / energy * 0.511e-3
+
+tws = twiss(lat, tw0)
+
+plot_opt_func(lat, tws, top_plot=["Dx","Dy"], legend=False)
+plt.show()
+
+# ---- Beam ----
+nparticles = 100000
+p_array = ParticleArray(n=nparticles)
+
+charge = 3e-9
+sigma_tau = 1e-3
+sigma_p = 0.01
+
+p_array.E = energy
+p_array.rparticles[4] = np.random.randn(nparticles) * sigma_tau
+p_array.rparticles[5] = np.random.randn(nparticles) * sigma_p
+p_array.q_array = np.ones(nparticles) * charge / nparticles
+
+for i in range(nparticles):
+    p_array.rparticles[0][i], p_array.rparticles[1][i] = gauss_from_twiss(tw0.emit_x, tw0.beta_x, tw0.alpha_x)
+    p_array.rparticles[2][i], p_array.rparticles[3][i] = gauss_from_twiss(tw0.emit_y, tw0.beta_y, tw0.alpha_y)
+
+# ---- CSR PROCESS ----
+navi = Navigator(lat)
+navi.unit_step = 0.1
+
+csr = PyCSR3DProc(step=1)
+navi.add_physics_proc(csr, csrm1_start, csrm1_end)
+
+# ---- Tracking ----
+p_array_t = deepcopy(p_array)
+start = time.time()
+
+tws_track, p_array_t = track(lat, p_array_t, navi)
+
+print("\n time exec:", time.time() - start, "sec")
+
+show_e_beam(p_array_t)
+plt.show()
+
+
+
+print(navi)
